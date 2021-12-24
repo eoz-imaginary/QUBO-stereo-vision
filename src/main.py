@@ -8,8 +8,10 @@ import argparse
 import cv2
 import maxflow as mf
 import matplotlib.pyplot as plt
+import csv
 from src.graph import kolmogorov_graph, handle_infinities, handle_infinities_scale_color
 from itertools import combinations
+import sys
 
 
 #takes in an image and splits it into patches
@@ -75,6 +77,47 @@ def unindexing(a, img):
     x1 = int(a/cols)
     return (x1, y1)
 
+def compute_alpha(g, edge_list):
+    # --> formula for alpha <--
+    # Sum_over_edges [cost{u, v}] - Sum_over_nodes [cost{s, u} + cost{t, u}]
+
+    a_term1 = 0
+    a_term2 = 0
+
+    for i in range(len(edge_list)):
+        uv_weight = edge_list[i][2]['weight']
+        a_term1 += uv_weight
+
+    for i in range(len(edge_list)):
+        u = edge_list[i][0]
+        v = edge_list[i][1]
+
+        u_in = list(g.in_edges(u, data=True))
+        u_out = list(g.out_edges(u, data=True))
+        src_edge_ind = None
+        sink_edge_ind = None
+
+
+        if u != ('s' or 't'):
+            for j in range(len(u_in)):
+                if u_in[j][0] == 's':
+                    #print("u_in:", u_in)
+                    src_edge_ind = j
+
+            for k in range(len(u_out)):
+                if u_out[k][1] == 't':
+                    #print("u_out:", u_out)
+                    sink_edge_ind = k
+
+        if (src_edge_ind is not None) and (sink_edge_ind is not None):
+            #print("neither ind is none")
+
+            print(u_in[src_edge_ind])
+            print(u_out[sink_edge_ind])
+            a_term2 += u_in[src_edge_ind][2]['weight'] + u_out[sink_edge_ind][2]['weight']
+
+    return a_term1 - a_term2
+
 def main():
 
     # parse input images
@@ -94,7 +137,6 @@ def main():
     nx_g = g.get_nx_graph()
 
 
-    alpha = 5 #TODO: compute alpha dynamically
     Q_size = (2*len(nx_g.edges())) + len(nx_g.nodes())
     vert_ind_start = 0
     y_ind_start = vert_ind_start + len(nx_g.nodes())
@@ -106,15 +148,69 @@ def main():
     src_ind = len(nx_g.nodes())-2
     sink_ind = len(nx_g.nodes())-1
     e_lst = list(nx_g.edges(data=True))
-    print(e_lst[0])
-    print("weight = ", e_lst[0][2]['weight'])
 
-    #H_COST
+    node_lst = list(nx_g.nodes)
+    test_node = e_lst[9]
+    #print(test_node)
+    #print("indexing?", node_lst[test_node])
+    #print("src?", node_lst[src_ind])
+    #print("sink?", node_lst[sink_ind])
 
-    for i in range(len(nx_g.edges())):
+    alpha = compute_alpha(nx_g, e_lst)
+    print("alpha is: ", alpha)
+
+    # H_COST
+    for i in range(len(e_lst)):
+        u = e_lst[i][0]
+        v = e_lst[i][1]
+        weight = e_lst[i][2]['weight']
         x = y_ind_start + i
         y = y_ind_start + i
-        Q[x, y] = nx_g.edges[i]['weight']
+        Q[x, y] += weight
+        if (x or y) > w_ind_start:
+            print("DISASTER!! y_uv at index reserved for w_uv")
+            print("x = ", x)
+            print("y = ", y)
+            print("i = ", i)
+
+
+    # -----> H_QUBO_Penalty <-----
+    # --> first 'half' <--
+    # alpha*(1 - x_s - x_t + 2 * x_s * x_t)
+    #TODO: might need to add offset of -1 to all cells?
+    Q[src_ind, src_ind] += -1*alpha
+    Q[sink_ind, sink_ind] += -1*alpha
+    Q[src_ind, sink_ind] += 2*alpha
+
+    # --> second 'half' <--
+    # alpha * Sum_over_edges [x_u + x_v + 2w_uv + x_u * y_uv + x_v * y_uv - 2x_u * w_uv - 2x_v * w_uv - 2y_uv * w_uv]
+    for i in range(len(e_lst)):
+        # set up Q-matrix indicies
+
+        u = e_lst[i][0]
+        v = e_lst[i][1]
+
+        if u == 's':
+            u = src_ind
+        if v == 't':
+            v = sink_ind
+
+        # adding vert_ind_start in next two lines unecessary, but there for clarity
+        x_u = vert_ind_start + u
+        x_v = vert_ind_start + v
+
+        y_uv = y_ind_start + i
+        w_uv = w_ind_start + i
+
+        # add values to Q-matrix
+        Q[x_u, x_u] += 1*alpha
+        Q[x_v, x_v] += 1*alpha
+        Q[w_uv, w_uv] += 2*alpha
+        Q[x_u, y_uv] += 1*alpha
+        Q[x_v, y_uv] += 1*alpha
+        Q[x_u, w_uv] += -2*alpha
+        Q[x_v, w_uv] += -2*alpha
+        Q[y_uv, w_uv] += -2*alpha
 
     '''
     for u, v in nx_g.edges():
@@ -145,6 +241,14 @@ def main():
 
     print(Q.shape)
     print(Q)
+
+    # Write to CSV to examine (DEBUGGING ONLY!!)
+    '''
+    with open("Q.csv", "w+") as file:
+        csvWriter = csv.writer(file, delimiter=",")
+        csvWriter.writerows(Q)
+    '''
+
 
     ''' 
     #OLD QUBO 
@@ -185,14 +289,18 @@ def main():
 
     '''
 
-    '''
+
     sampler = neal.SimulatedAnnealingSampler()
-    sampleset = sampler.sample_qubo(Q, chain_strength=20, num_reads=10)
+    sampleset = sampler.sample_qubo(Q, chain_strength=20, num_reads=1000)
 
     sample = sampleset.first.sample
 
     print("\nProcessing solution...")
     disp_im = np.zeros((l_test_sm.shape[0], l_test_sm.shape[1]))
+    print("sample shape is: ", len(sample.items()))
+    #for key, val in sample.items():
+    #    print("key, val = ", key, val)
+    '''
     for key, val in sample.items():
         # NOTE: workaround for s & t nodes due to (str % int) error otherwise
         if key != 's' and key != 't':
@@ -204,7 +312,8 @@ def main():
         elif key == 't':
             x, y = l_test_sm.shape[0]-1, l_test_sm.shape[1]-1
             disp_im[x, y] = val
-
+    '''
+    '''
     fig, (ax1, ax2) = plt.subplots(1, 2)
     ax1.imshow(l_test_sm, cmap='Greys')
     ax1.axes.xaxis.set_visible(False)
@@ -213,8 +322,9 @@ def main():
     ax2.axes.xaxis.set_visible(False)
     ax2.axes.yaxis.set_visible(False)
     plt.savefig("output.png")
-    print("\nOutput file generated successfully")
     '''
+    print("\nOutput file generated successfully")
+
 
 
 
