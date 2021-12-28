@@ -86,6 +86,7 @@ def compute_alpha(g, edge_list):
 
     a_term1 = 0
     a_term2 = 0
+    seen_nodes = []
 
     for i in range(len(edge_list)):
         uv_weight = edge_list[i][2]['weight']
@@ -98,11 +99,13 @@ def compute_alpha(g, edge_list):
 
         u_in = list(g.in_edges(u, data=True))
         u_out = list(g.out_edges(u, data=True))
+        #print(u, "in: ", u_in)
+        #print(u, "out: ", u_out)
         src_edge_ind = None
         sink_edge_ind = None
 
 
-        if u != ('s' or 't'):
+        if u != ('s' or 't') and u not in seen_nodes:
             for j in range(len(u_in)):
                 if u_in[j][0] == 's':
                     #print("u_in:", u_in)
@@ -112,6 +115,7 @@ def compute_alpha(g, edge_list):
                 if u_out[k][1] == 't':
                     #print("u_out:", u_out)
                     sink_edge_ind = k
+            seen_nodes.append(u)
 
         if (src_edge_ind is not None) and (sink_edge_ind is not None):
             print("neither ind is none")
@@ -286,22 +290,22 @@ def main():
     g = kolmogorov_graph(l_test_sm, r_test_sm)
     nx_g = g.get_nx_graph()
 
-    test_e_lst = [('s', 0, {"weight": 1}), ('s', 1, {"weight": 2}), (0, 't', {"weight": 2}), (1, 't', {"weight": 1}), (0, 1, {"weight": 1})]
+    test_e_lst = [('s', 0, {"weight": 1}), ('s', 1, {"weight": 1}), (0, 2, {"weight": 3}), (0, 't', {"weight": 2}), (1, 't', {"weight": 1})]
     #test_nodes = [0, 1, 's', 't']
-    test_g = nx.DiGraph()
+    #test_g = nx.DiGraph()
     #test_g.add_nodes_from(test_nodes)
-    test_g.add_edges_from(test_e_lst)
-    print(test_g.nodes)
-    print(test_g.edges)
+    #test_g.add_edges_from(test_e_lst)
+    #print(test_g.nodes)
+    #print(test_g.edges)
 
     # compute alpha
-    alpha = compute_alpha(test_g, test_e_lst)
+    alpha = compute_alpha(nx_g, test_e_lst)
     #alpha = 5
 
 
     #qubo, model = Q_from_pyq(e_lst, nodes)
 
-    Q, e_lst = create_Q(test_g, alpha)
+    Q, e_lst = create_Q(nx_g, alpha)
     print(Q)
 
     sampler = neal.SimulatedAnnealingSampler()
@@ -314,30 +318,31 @@ def main():
 
     cut_edges = []
     uncut_edges = []
-    #print("range is ", len(nx_g.nodes), len(lowest)-len(nx_g.edges)-1)
-    print("range is ", len(test_g.nodes), len(lowest)-len(test_g.edges)-1)
-    #for i in range(len(nx_g.nodes), len(lowest)-len(nx_g.edges)-1):
-    for i in range(len(test_g.nodes), len(lowest)-len(test_g.edges)):
+    print("range is ", len(nx_g.nodes), len(lowest)-len(nx_g.edges)-1)
+    #print("range is ", len(test_g.nodes), len(lowest)-len(test_g.edges)-1)
+    for i in range(len(nx_g.nodes), len(lowest)-len(nx_g.edges)-1):
+    #for i in range(len(test_g.nodes), len(lowest)-len(test_g.edges)):
         key = keys[i]
         val = vals[i]
         if val == 1:
-            #cut_edges.append((key-len(nx_g.nodes), val))
-            cut_edges.append((key-len(test_g.nodes), val))
+            cut_edges.append((key-len(nx_g.nodes), val))
+            #cut_edges.append((key-len(test_g.nodes), val))
         else:
-            #uncut_edges.append((key-len(nx_g.nodes), val))
-            uncut_edges.append((key-len(test_g.nodes), val))
+            uncut_edges.append((key-len(nx_g.nodes), val))
+            #uncut_edges.append((key-len(test_g.nodes), val))
 
-    #print(len(cut_edges), " cut out of ", len(nx_g.edges), " in total.")
-    print(len(cut_edges), " cut out of ", len(test_g.edges), " in total.")
+    print(len(cut_edges), " cut out of ", len(nx_g.edges), " in total.")
+    #print(len(cut_edges), " cut out of ", len(test_g.edges), " in total.")
 
-    #if vals[len(nx_g.nodes)-2] == vals[len(nx_g.nodes)-1]:
-    if vals[len(test_g.nodes)-2] == vals[len(test_g.nodes)-1]:
+    if vals[len(nx_g.nodes)-2] == vals[len(nx_g.nodes)-1]:
+    #if vals[len(test_g.nodes)-2] == vals[len(test_g.nodes)-1]:
         print("invalid solution, source and sink in same partition")
-        #print("source in partition", vals[len(nx_g.nodes)-2], "sink in partition", vals[len(nx_g.nodes)-1])
-        print("source in partition", vals[len(test_g.nodes)-2], "sink in partition", vals[len(test_g.nodes)-1])
-    print(uncut_edges)
-    for i in range(len(uncut_edges)):
-        print(e_lst[uncut_edges[i][0]])
+        print("source in partition", vals[len(nx_g.nodes)-2], "sink in partition", vals[len(nx_g.nodes)-1])
+        #print("source in partition", vals[len(test_g.nodes)-2], "sink in partition", vals[len(test_g.nodes)-1])
+    #print("uncut edges: ", uncut_edges)
+    print("cut edges: ", cut_edges)
+    #for i in range(len(uncut_edges)):
+    #    print(e_lst[uncut_edges[i][0]])
 
     '''
     decoded_samples = model.decode_sampleset(sampleset)
