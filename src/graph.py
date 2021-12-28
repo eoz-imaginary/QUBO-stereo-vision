@@ -1,15 +1,7 @@
-import maxflow as mf
-import numpy as np
-import matplotlib.pyplot as plt
-import cv2
-
 import numpy as np
 import cv2
-import os
-import math
 import maxflow
 import sys
-from scipy import stats
 
 '''
 code from https://github.com/jccrowley/StereoCorrespondence_GraphCuts
