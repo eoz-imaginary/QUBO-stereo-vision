@@ -15,6 +15,7 @@ from src.graph import kolmogorov_graph, handle_infinities, handle_infinities_sca
 from itertools import combinations
 import sys
 from pyqubo import Binary, Array, Constraint
+from src.graph_generator import gen_digraph_5, gen_digraph_20, gen_digraph_30
 
 
 #takes in an image and splits it into patches
@@ -56,29 +57,6 @@ def plot_graph_3d(graph, nodes_shape, plot_terminal=True, plot_weights=True, fon
     plt.axis('equal')
     plt.savefig('testgraph55.png')
 
-#old version
-def create_graph(img, width, height, depth):
-    g = mf.GraphInt()
-    nodeids = g.add_grid_nodes((depth, height, width))
-    structure = np.array([[0, 1, 0,
-                           1, 0, 1,
-                           0, 1, 0]])
-    g.add_grid_edges(nodeids, weights=img, structure=structure)
-
-    #img pixels are source caps, inverse img pixels are sink caps
-    g.add_grid_tedges(nodeids[:, :, 0], img, 255-img)
-    #add sink
-    g.add_grid_tedges(nodeids[:, :, -1], img, 255-img)
-
-    return nodeids, g
-
-# from https://github.com/dwave-examples/image-segmentation/blob/main/image_segmentation.py
-def unindexing(a, img):
-    rows, cols = img.shape
-    print(a, cols)
-    y1 = a % cols
-    x1 = int(a/cols)
-    return (x1, y1)
 
 def compute_alpha(g, edge_list):
     # --> formula for alpha <--
@@ -99,8 +77,7 @@ def compute_alpha(g, edge_list):
 
         u_in = list(g.in_edges(u, data=True))
         u_out = list(g.out_edges(u, data=True))
-        #print(u, "in: ", u_in)
-        #print(u, "out: ", u_out)
+
         src_edge_ind = None
         sink_edge_ind = None
 
@@ -130,13 +107,13 @@ def compute_alpha(g, edge_list):
 
 
 def create_Q(nx_g, alpha):
-    """
+    '''
      --> precompute Q-matrix dimensions and index "landmarks" <--
      THE MATRIX: (2*E + V) x (2*E + V)
      GRAPH NODE INDICIES (the x_v's): [0, num_nodes)
      EDGE INDICIES, SET 1 (the y_uv's): [num_nodes, num_nodes+num_edges)
      EDGE INDICIES, SET 2 (the w_uv's): [num_nodes+num_edges, num_nodes+num_edges+num_edges)
-    """
+    '''
 
 
     Q_size = (2 * len(nx_g.edges())) + len(nx_g.nodes())
@@ -145,9 +122,14 @@ def create_Q(nx_g, alpha):
     y_ind_start = vert_ind_start + len(nx_g.nodes())
     w_ind_start = y_ind_start + len(nx_g.edges())
 
-    print("Q is ", Q_size, " x ", Q_size)
-    print("y start = ", y_ind_start, "w start = ", w_ind_start, "for a graph of ", len(nx_g.nodes()), " nodes and ",
-          len(nx_g.edges()), " edges.")
+    '''
+    helpful info when creating/debugging Q:
+    '''
+    
+    #print("Q is ", Q_size, " x ", Q_size)
+    #print("y start = ", y_ind_start, "w start = ", w_ind_start, "for a graph of ", len(nx_g.nodes()), " nodes and ",
+    #      len(nx_g.edges()), " edges.")
+    
 
     # IN NODE LIST: src at index len(nodes)-2, sink at len(nodes)-1
     src_ind = len(nx_g.nodes()) - 2
@@ -155,7 +137,6 @@ def create_Q(nx_g, alpha):
 
     # convert edge & node dicts to lists for easy access
     e_lst = list(nx_g.edges(data=True))
-    #node_lst = list(nx_g.nodes)
 
     print("alpha is: ", alpha)
 
@@ -181,7 +162,6 @@ def create_Q(nx_g, alpha):
      first 'half': alpha*(1 - x_s - x_t + 2 * x_s * x_t)
     """
 
-    # TODO: might need to add offset of -1 to all cells?
     Q[src_ind, src_ind] += -1 * alpha
     Q[sink_ind, sink_ind] += -1 * alpha
     Q[src_ind, sink_ind] += 2 * alpha
@@ -219,103 +199,103 @@ def create_Q(nx_g, alpha):
 
     return Q, e_lst
 
-
-def Q_from_pyq(e_lst, node_lst):
-    #e_lst = list(nx_g.edges(data=True))
-    #node_lst = list(nx_g.nodes)
-    num_edges = len(e_lst)
-    num_nodes = len(node_lst)
-
-    # compute alpha
-    #alpha = compute_alpha(nx_g, e_lst)
-    alpha = 100
-    print("alpha is: ", alpha)
-
-    #set up arrays
-
-    edges_binary = Array.create('edge', shape=num_edges, vartype="BINARY") # y_uvs
-    nodes_binary = Array.create('node', shape=num_nodes, vartype="BINARY") # x_vs
-    ancillas_binary = Array.create('ancilla', shape=num_edges, vartype="BINARY") # w_uvs
-
-    edge_weights = sum(e_lst[i][2]['weight'] * edges_binary[i] for i in range(num_edges))
-
-    H_cost = edge_weights
-
-    H_penalty_1 = ((-1 * nodes_binary[num_nodes-2]) + (-1 * nodes_binary[num_nodes-1]) +
-                           (2 * nodes_binary[num_nodes-2] * nodes_binary[num_nodes-1]))
-    H_penalty_2 = 0
-
-
-    #H_pen_test = Constraint(sum((1-edges_binary[i]) * (nodes_binary[e_lst[i][0]] + nodes_binary[e_lst[i][1]] - 2 * nodes_binary[e_lst[i][0]] * nodes_binary[e_lst[i][1]]) for i in range(num_edges)), "cut constraint")
-
-
-    for i in range(num_edges):
-        u = e_lst[i][0]
-        v = e_lst[i][1]
-        if u == 's':
-            u = num_nodes-2
-        if v == 't':
-            v = num_nodes-1
-        #print("u = ", u)
-        #print("v = ", v)
-        #print("node u is ", nodes_binary[u])
-        #print("node v is ", nodes_binary[v])
-        #print("edge i is ", edges_binary[i])
-        H_penalty_2 += Constraint((1-edges_binary[i]) * (nodes_binary[u] + nodes_binary[v] - 2 * nodes_binary[u] * nodes_binary[v]), label="cut constraint{}".format(i))
-    #H_penalty_2 = Constraint(H_penalty_2, "cut constraint")
-
-    H = H_cost + alpha*(H_penalty_1 + H_penalty_2)
-
-    model = H.compile()
-
-    qubo = model.to_bqm(index_label=True)
-
-    return qubo, model
-
-
 def main():
+    
 
     # parse input images
 
-    #TODO: take images as cmd arguments
+    #TODO: remove graphs-from-images code (due to bug) and replace with Q-from-digraph annealing only
+
     left = "images/middlebury_flowerpots_view1.png"
     right = "images/middlebury_flowerpots_view2.png"
-    l_test = cv2.cvtColor(cv2.imread(left), cv2.COLOR_RGB2GRAY)
-    l_test_sm = cv2.resize(l_test, (0, 0), fx=0.01, fy=0.01)
-    r_test = cv2.cvtColor(cv2.imread(right), cv2.COLOR_RGB2GRAY)
-    r_test_sm = cv2.resize(r_test, (0, 0), fx=0.01, fy=0.01)
-    #l_patch = get_image_patches(left, 15, 15)
-    #r_patch = get_image_patches(right, 15, 15)
 
-    g = kolmogorov_graph(l_test_sm, r_test_sm)
-    nx_g = g.get_nx_graph()
 
-    test_e_lst = [('s', 0, {"weight": 1}), ('s', 1, {"weight": 1}), (0, 2, {"weight": 3}), (0, 't', {"weight": 2}), (1, 't', {"weight": 1})]
-    #test_nodes = [0, 1, 's', 't']
-    #test_g = nx.DiGraph()
-    #test_g.add_nodes_from(test_nodes)
-    #test_g.add_edges_from(test_e_lst)
-    #print(test_g.nodes)
-    #print(test_g.edges)
+    ''' 
+    --> when creating the graphs-from-images, full-sized images will be too big.
+    --> you should either scale down each image to a smaller size, or extract a patch
+    --> I prefer to scale down the image, but have included sample patches for convenience 
+    '''
+
+    l_gray = cv2.cvtColor(cv2.imread(left), cv2.COLOR_RGB2GRAY)
+    l_gray_small = cv2.resize(l_gray, (0, 0), fx=0.01, fy=0.01)
+    #l_gray_patch = get_image_patches(left, 15, 15)
+
+    r_gray = cv2.cvtColor(cv2.imread(right), cv2.COLOR_RGB2GRAY)
+    r_gray_small = cv2.resize(r_gray, (0, 0), fx=0.01, fy=0.01)    
+    #r_gray_patch = get_image_patches(right, 15, 15)
+
+
+    #g = kolmogorov_graph(l_gray_small, r_gray_small)
+    #nx_g = g.get_nx_graph()
+
+    nx_g, e_lst = gen_digraph_20()
+    Q, e_lst = create_Q(nx_g, alpha)
 
     # compute alpha
-    alpha = compute_alpha(nx_g, test_e_lst)
-    #alpha = 5
+    alpha = compute_alpha(nx_g, e_lst)
 
-
-    #qubo, model = Q_from_pyq(e_lst, nodes)
-
-    Q, e_lst = create_Q(nx_g, alpha)
-    print(Q)
+    
+    print("this graph has", len(nx_g.nodes), "nodes and", len(e_lst), "edges")
+    #print(Q)
 
     sampler = neal.SimulatedAnnealingSampler()
-    sampleset = sampler.sample_qubo(Q, num_reads=1000)
+    chain_strength = np.trace(Q) // len(Q.diagonal())
+    sampleset = sampler.sample_qubo(Q, chain_strength=chain_strength, num_runs=11000)
     lowest = sampleset.first[0]
     keys = list(lowest.keys())
     vals = list(lowest.values())
     print("lowest = ", lowest)
     energy = sampleset.first[1]
 
+
+    cut_edges = []
+    uncut_edges = []
+    S0 = []
+    S1 = []
+    edge_list = list(nx_g.edges)
+    node_list = list(nx_g.nodes)
+    print("range is ", len(nx_g.nodes), len(lowest) - len(nx_g.edges))
+    # print("range is ", len(test_g.nodes), len(lowest)-len(test_g.edges)-1)
+    for i in range(len(nx_g.nodes), len(lowest) - len(nx_g.edges)):
+        # for i in range(len(test_g.nodes), len(lowest)-len(test_g.edges)):
+        key = keys[i]
+        val = vals[i]
+        if val == 1:
+            edge = edge_list[key-len(nx_g.nodes)]
+            cut_edges.append(edge)
+        else:
+            edge = edge_list[key-len(nx_g.nodes)]
+            uncut_edges.append(edge)
+
+    for i in range(0, len(nx_g.nodes)):
+        key = keys[i]
+        val = vals[i]
+        if val == 0:
+            S0.append(node_list[key])
+        if val == 1:
+            S1.append(node_list[key])
+
+    print("S0", S0)
+    print("S1", S1)
+    print("cut edges", cut_edges)
+
+    # Display best result
+    pos = nx.shell_layout(nx_g)
+
+    nx.draw_networkx_nodes(nx_g, pos, nodelist=nx_g.nodes, node_color='r')
+    #nx.draw_networkx_nodes(nx_g, pos, nodelist=S1, node_color='c')
+    nx.draw_networkx_edges(nx_g, pos, edgelist=cut_edges, style='dashdot', alpha=0.5, width=3)
+    nx.draw_networkx_edges(nx_g, pos, edgelist=uncut_edges, style='solid', width=3)
+    nx.draw_networkx_labels(nx_g, pos)
+    edgeLabels = nx.get_edge_attributes(nx_g, 'weight')
+    nx.draw_networkx_edge_labels(nx_g, pos, edge_labels=edgeLabels)
+
+    filename = "results_30nodes_alt2.png"
+    plt.savefig(filename, bbox_inches='tight')
+    print("\nYour plot is saved to {}".format(filename))
+
+
+    """
     cut_edges = []
     uncut_edges = []
     print("range is ", len(nx_g.nodes), len(lowest)-len(nx_g.edges)-1)
@@ -343,6 +323,7 @@ def main():
     print("cut edges: ", cut_edges)
     #for i in range(len(uncut_edges)):
     #    print(e_lst[uncut_edges[i][0]])
+    """
 
     '''
     decoded_samples = model.decode_sampleset(sampleset)
@@ -436,6 +417,60 @@ main()
 # DUMPING GROUND FOR OLD CODE
 
 '''
+
+
+
+def Q_from_pyq(e_lst, node_lst):
+
+    num_edges = len(e_lst)
+    num_nodes = len(node_lst)
+
+    # compute alpha
+    #alpha = compute_alpha(nx_g, e_lst)
+    alpha = 100
+    print("alpha is: ", alpha)
+
+    #set up arrays
+
+    edges_binary = Array.create('edge', shape=num_edges, vartype="BINARY") # y_uvs
+    nodes_binary = Array.create('node', shape=num_nodes, vartype="BINARY") # x_vs
+    ancillas_binary = Array.create('ancilla', shape=num_edges, vartype="BINARY") # w_uvs
+
+    edge_weights = sum(e_lst[i][2]['weight'] * edges_binary[i] for i in range(num_edges))
+
+    H_cost = edge_weights
+
+    H_penalty_1 = ((-1 * nodes_binary[num_nodes-2]) + (-1 * nodes_binary[num_nodes-1]) +
+                           (2 * nodes_binary[num_nodes-2] * nodes_binary[num_nodes-1]))
+    H_penalty_2 = 0
+
+    for i in range(num_edges):
+        u = e_lst[i][0]
+        v = e_lst[i][1]
+        if u == 's':
+            u = num_nodes-2
+        if v == 't':
+            v = num_nodes-1
+
+        H_penalty_2 += Constraint((1-edges_binary[i]) * (nodes_binary[u] + nodes_binary[v] - 2 * nodes_binary[u] * nodes_binary[v]), label="cut constraint{}".format(i))
+
+    H = H_cost + alpha*(H_penalty_1 + H_penalty_2)
+
+    model = H.compile()
+
+    qubo = model.to_bqm(index_label=True)
+
+    return qubo, model
+
+
+# from https://github.com/dwave-examples/image-segmentation/blob/main/image_segmentation.py
+def unindexing(a, img):
+    rows, cols = img.shape
+    print(a, cols)
+    y1 = a % cols
+    x1 = int(a/cols)
+    return (x1, y1)
+
 for u, v in nx_g.edges():
     #issue with s & t labels
     u_before = u
