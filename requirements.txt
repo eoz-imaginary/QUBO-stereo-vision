@@ -3,5 +3,4 @@ dwave-neal>=0.4.2
 networkx==2.6.2
 matplotlib
 numpy==1.21.4
-opencv-python>=4.5.1.48
-PyMaxflow==1.2.13
+csv

@@ -1,7 +1,6 @@
 import networkx as nx
-import numpy as np
-import random
 
+'''generate sample networkX digraphs with 5/20/30 nodes and varying edge weights '''
 
 def gen_digraph_5():
     test_e_lst = [('s', 0, {"weight": 1}), ('s', 1, {"weight": 1}), (0, 2, {"weight": 3}), (0, 't', {"weight": 2}),
